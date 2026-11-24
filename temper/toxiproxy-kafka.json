@@ -1,0 +1,5 @@
+[
+  {"name": "client_kafka1", "listen": "0.0.0.0:9201", "upstream": "kafka1:9094", "enabled": true},
+  {"name": "client_kafka2", "listen": "0.0.0.0:9202", "upstream": "kafka2:9094", "enabled": true},
+  {"name": "client_kafka3", "listen": "0.0.0.0:9203", "upstream": "kafka3:9094", "enabled": true}
+]

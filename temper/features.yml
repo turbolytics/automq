@@ -1,0 +1,11 @@
+# What AutoMQ does, from its README (github.com/AutoMQ/automq) and docs.
+features:
+  - id: storage.s3_wal
+    description: Each broker writes its write-ahead log to S3 and keeps no replicas on other brokers; durability comes from object storage.
+    requires: [faults]
+  - id: failover.wal_recovery
+    description: When a broker fails, the controller has another broker recover its WAL from S3 and take over its partitions.
+    requires: [faults]
+  - id: producer.idempotent
+    description: Idempotent producers (enable.idempotence, acks=all), as in Apache Kafka.
+    requires: [faults]

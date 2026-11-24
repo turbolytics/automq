@@ -1,0 +1,60 @@
+# The differential: Apache Kafka 3.9.1 on three KRaft brokers, replication
+# factor 3 and min.insync.replicas 2, with the same oracle and workload as the
+# AutoMQ topology (temper/compose.yml). A scenario that fails on AutoMQ and
+# passes here is AutoMQ's; one that fails on both is the client's or Kafka's.
+
+x-kafka-env: &kafka-env
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  # Brokers replicate over PLAINTEXT directly; clients use CLIENT, which each
+  # broker advertises at its Toxiproxy listener, so a client edge can be
+  # slowed without touching replication or leadership.
+  KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,CLIENT://:9094
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,CLIENT:PLAINTEXT
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_BROKER_HEARTBEAT_INTERVAL_MS: 1000
+  KAFKA_BROKER_SESSION_TIMEOUT_MS: ${SESSION_MS:-4000}
+  # A follower stays in the in-sync set this long without fetching (30 s by
+  # default). The follower-freeze differential raises both to 60 s, so the
+  # leader holds acks=all writes for the whole freeze, as an AutoMQ broker
+  # with no S3 does.
+  KAFKA_REPLICA_LAG_TIME_MAX_MS: ${REPLICA_LAG_MS:-30000}
+  KAFKA_HEAP_OPTS: "-Xms320m -Xmx512m"
+
+x-kafka: &kafka
+  image: apache/kafka:3.9.1
+  healthcheck:
+    test: ["CMD", "nc", "-z", "localhost", "9093"]
+    interval: 1s
+    retries: 60
+
+services:
+  kafka1:
+    <<: *kafka
+    environment: {<<: *kafka-env, KAFKA_NODE_ID: 1, KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka1:9092,CLIENT://toxiproxy:9201"}
+  kafka2:
+    <<: *kafka
+    environment: {<<: *kafka-env, KAFKA_NODE_ID: 2, KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka2:9092,CLIENT://toxiproxy:9202"}
+  kafka3:
+    <<: *kafka
+    environment: {<<: *kafka-env, KAFKA_NODE_ID: 3, KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka3:9092,CLIENT://toxiproxy:9203"}
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    command: [-host=0.0.0.0, -config=/toxiproxy.json]
+    volumes: ["./toxiproxy-kafka.json:/toxiproxy.json:ro"]
+  oracle:
+    build: {context: recipe/oracle}
+    image: automq-recipe-oracle
+    command: ["true"]
+    environment: {BOOTSTRAP: "toxiproxy:9201,toxiproxy:9202,toxiproxy:9203"}
+    volumes: ["ledger:/ledger"]
+
+volumes:
+  ledger:

@@ -1,0 +1,55 @@
+# Each claim quotes AutoMQ's README (github.com/AutoMQ/automq): "High
+# Reliability: Leverage object storage service to achieve zero RPO, RTO in
+# seconds and 99.999999999% durability", and "100% Kafka Compatible: Fully
+# compatible with Apache Kafka". The Kafka claims are the ones Apache Kafka
+# makes for idempotent producers. The truth is a ledger of every send's
+# outcome; the oracle (temper/recipe/oracle) reads every partition back.
+invariants:
+  - id: ack.never_lost
+    claim: >
+      A write the broker acknowledged is never lost: it stays at the offset
+      it was acknowledged at, whatever fails. ("zero RPO")
+    applies_to: broker
+    class: safety
+    family: durability
+    requires: [faults]
+  - id: idempotence.no_duplicates
+    claim: >
+      An idempotent producer's write appears once, even when the client
+      retries it after a fault. (Apache Kafka's idempotent producer; "100%
+      Kafka Compatible")
+    applies_to: broker
+    class: safety
+    family: delivery
+    requires: [faults]
+  - id: order.per_partition
+    claim: >
+      Within a partition, one idempotent producer's writes appear in the
+      order it sent them.
+    applies_to: broker
+    class: safety
+    family: order
+    requires: [faults]
+  - id: failed.stays_failed
+    claim: >
+      A write that failed may have been stored (a timeout leaves its outcome
+      unknown), but it never appears after a later write of the same producer
+      that was acknowledged: a failed write does not come back later.
+    applies_to: broker
+    class: safety
+    family: delivery
+    requires: [faults]
+  - id: log.no_phantoms
+    claim: Every record in the log was sent by a producer.
+    applies_to: broker
+    class: safety
+    family: delivery
+    requires: [faults]
+  - id: failover.rto_bounded
+    claim: >
+      After a broker fails, every partition takes writes again within 30 s.
+      ("RTO in seconds")
+    applies_to: broker
+    class: liveness
+    family: availability
+    requires: [faults]

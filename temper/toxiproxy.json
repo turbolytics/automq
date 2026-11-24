@@ -1,0 +1,5 @@
+[
+  {"name": "s3_server1", "listen": "0.0.0.0:9101", "upstream": "minio:9000", "enabled": true},
+  {"name": "s3_server2", "listen": "0.0.0.0:9102", "upstream": "minio:9000", "enabled": true},
+  {"name": "s3_server3", "listen": "0.0.0.0:9103", "upstream": "minio:9000", "enabled": true}
+]

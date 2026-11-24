@@ -1,0 +1,35 @@
+# Every scenario: MinIO, Toxiproxy and three AutoMQ servers start; two
+# idempotent producers send numbered values to every partition and write a
+# ledger line for each send's outcome; the faults run while they send. Then
+# the oracle reads every partition back and decides each claim
+# (temper/recipe/oracle/oracle/verdict.py). Each `check` pair is
+# reference=metric.
+#
+#   temper scenarios run --scenario <id> --build
+#
+- id: automq.broker_crash
+  runner: temper
+  name: Broker crashes lose no acknowledged write, and partitions take writes again within seconds
+  description: >
+    A server is killed every 10-20 s for a minute and started again 0.5-2.5 s
+    later. Another server recovers its WAL from S3 and takes over its
+    partitions.
+  compose: temper/compose.yml
+  subject: automq
+  covers: [ack.never_lost, idempotence.no_duplicates, order.per_partition, failed.stays_failed, log.no_phantoms, failover.rto_bounded, failover.wal_recovery]
+  seed: 11
+  events:
+    - up: {minio: 1, toxiproxy: 1}
+    - buckets: []
+    - up: {server1: 1, server2: 1, server3: 1}
+    - wait_until: {oracle: [ready], equals: "3", timeout: 180s}
+    - oracle: [setup, "{subject}"]
+    - hold: {name: writer, oracle: [write, "{subject}", "90"]}   # the producers send for 90 s
+    - sleep: 10s
+    - check: {covers: ack.never_lost, oracle: [writing, "{subject}"]}   # still sending, or the faults below test nothing
+    - chaos: {duration: 60s, every: 10s-20s, faults: [server.kill]}
+    - wait_until: {oracle: [writing, "{subject}"], equals: "1", timeout: 5m}
+    - check:
+        results:
+          oracle: [check, "{subject}", "ack.never_lost=lost", "idempotence.no_duplicates=dups", "order.per_partition=order", "failed.stays_failed=resurrected", "log.no_phantoms=unexpected", "failover.rto_bounded=rto", "failover.wal_recovery=lost"]
+          decides: [ack.never_lost, idempotence.no_duplicates, order.per_partition, failed.stays_failed, log.no_phantoms, failover.rto_bounded, failover.wal_recovery]

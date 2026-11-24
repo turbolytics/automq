@@ -1,0 +1,4 @@
+id: automq
+kind: broker
+feature: storage.s3_wal
+# AutoMQ 1.7.5 on three servers and MinIO (temper/compose.yml).

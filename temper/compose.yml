@@ -1,0 +1,90 @@
+# The topology for AutoMQ's scenarios (temper/scenarios): three AutoMQ
+# servers (each a broker and a KRaft controller, as AutoMQ's own
+# docker/docker-compose-cluster.yaml runs them), MinIO as the S3 store, and
+# Toxiproxy between each server and MinIO. Every server reaches S3 through its
+# own proxy listener, so each broker-to-S3 edge can be cut, slowed or made to
+# fail on its own (temper/commands.yml, s3_edge).
+#
+# AutoMQ keeps no replicas on brokers: each broker writes its write-ahead log
+# (WAL) to S3, and when a broker fails another one recovers that WAL and takes
+# over its partitions.
+
+x-automq-env: &automq-env
+  KAFKA_S3_ACCESS_KEY: minioadmin
+  KAFKA_S3_SECRET_KEY: minioadmin
+  # Small heaps: the Docker VM is shared. AutoMQ's own compose gives 1-4 GB.
+  KAFKA_HEAP_OPTS: "-Xms512m -Xmx768m -XX:MetaspaceSize=96m -XX:MaxDirectMemorySize=768m"
+  CLUSTER_ID: 5XF4fHIOTfSIqkmje2KFlg
+
+# One server's command. NODE is its node id, PROXY its Toxiproxy port.
+# Accelerated timeouts, defaults in parentheses: a broker heartbeats every
+# 1 s (2 s) and the controller fences it after 4 s of silence (9 s).
+x-automq: &automq
+  image: automqinc/automq:1.7.5
+  stop_grace_period: 30s
+  depends_on: [minio, toxiproxy]
+  # The controller port opens at startup. The broker port waits for a KRaft
+  # quorum, which a server started alone never has, so the scenario waits for
+  # all three brokers itself (oracle ready).
+  healthcheck:
+    test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9093'"]
+    interval: 2s
+    retries: 90
+  command:
+    - bash
+    - -c
+    - |
+      exec /opt/automq/kafka/bin/kafka-server-start.sh \
+      /opt/automq/kafka/config/kraft/server.properties \
+      --override cluster.id=$$CLUSTER_ID \
+      --override node.id=$$NODE \
+      --override controller.quorum.voters=0@server1:9093,1@server2:9093,2@server3:9093 \
+      --override controller.quorum.bootstrap.servers=server1:9093,server2:9093,server3:9093 \
+      --override advertised.listeners=PLAINTEXT://$$HOST:9092 \
+      --override broker.heartbeat.interval.ms=1000 \
+      --override broker.session.timeout.ms=4000 \
+      --override s3.data.buckets="0@s3://automq-data?region=us-east-1&endpoint=http://toxiproxy:$$PROXY&pathStyle=true" \
+      --override s3.ops.buckets="1@s3://automq-ops?region=us-east-1&endpoint=http://toxiproxy:$$PROXY&pathStyle=true" \
+      --override s3.wal.path="0@s3://automq-data?region=us-east-1&endpoint=http://toxiproxy:$$PROXY&pathStyle=true"
+
+services:
+  minio:
+    image: pgsty/silo:RELEASE.2026-09-03T13-18-01Z
+    environment: {MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin, MINIO_DOMAIN: minio}
+    command: [server, /data, --console-address, ":9001"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      retries: 30
+
+  # One-shot: create the buckets (temper/commands.yml, buckets).
+  buckets:
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
+    entrypoint: [/bin/sh, -c]
+    command: ["true"]
+
+  # Each server's S3 edge: server1 -> :9101, server2 -> :9102, server3 -> :9103.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    command: [-host=0.0.0.0, -config=/toxiproxy.json]
+    volumes: ["./toxiproxy.json:/toxiproxy.json:ro"]
+
+  server1:
+    <<: *automq
+    environment: {<<: *automq-env, NODE: "0", HOST: server1, PROXY: "9101"}
+  server2:
+    <<: *automq
+    environment: {<<: *automq-env, NODE: "1", HOST: server2, PROXY: "9102"}
+  server3:
+    <<: *automq
+    environment: {<<: *automq-env, NODE: "2", HOST: server3, PROXY: "9103"}
+
+  # One-shot: the workload's producers and the oracle that decides each claim.
+  oracle:
+    build: {context: recipe/oracle}
+    image: automq-recipe-oracle
+    command: ["true"]
+    volumes: ["ledger:/ledger"]
+
+volumes:
+  ledger:

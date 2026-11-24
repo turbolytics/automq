@@ -1,0 +1,16 @@
+temper: "0.1"
+project: automq
+
+levels:
+  - name: faults
+    description: >
+      AutoMQ 1.7.5 (automqinc/automq): three servers, each a broker and a
+      KRaft controller, on MinIO, in Docker, with Toxiproxy on every
+      broker-to-S3 edge. Servers are killed and frozen; S3 edges are cut,
+      slowed and reset.
+
+# The service pack's kill and pause faults on the AutoMQ servers.
+packs:
+  - pack: service
+    as: server
+    with: {target: "server*"}

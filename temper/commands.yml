@@ -1,0 +1,16 @@
+commands:
+  oracle:
+    doc: >
+      The workload and the oracle (temper/recipe/oracle): setup creates the
+      topic, write runs the producers and their ledger, writing says whether
+      they finished, and check reads every partition back.
+    run: [oracle, python, -m, oracle]
+  s3_edge:
+    doc: >
+      Cut, slow, reset or restore broker-to-S3 edges through Toxiproxy.
+      Arguments: the scenario's short name, the target (server1-3, all, or
+      leader:<partition>), the action, and for slow its milliseconds.
+    host: [sh, temper/recipe/s3_edge.sh]
+  buckets:
+    doc: Create the S3 buckets in MinIO (a one-shot service).
+    run: [buckets, "until mc alias set minio http://minio:9000 minioadmin minioadmin >/dev/null; do sleep 1; done; mc mb --ignore-existing minio/automq-data minio/automq-ops"]
